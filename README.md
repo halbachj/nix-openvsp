@@ -32,7 +32,8 @@ $ nix build
 $ ./result/bin/vsp
 ```
 
-`nix flake check` evaluates the package and overlay.
+`nix flake check` evaluates the package, the overlay, and the Python tool
+smoke test.
 
 ## Use as a flake input
 
@@ -64,6 +65,52 @@ package already allows itself through nixpkgs' unfree check, so no
 For Home Manager, the equivalent is `home.packages = [ openvsp.packages.${pkgs.system}.default ];`
 in a `home-manager.users.<name>` module.
 
+### Python bindings
+
+The Python API ships inside the same `.deb`, including the compiled `_vsp`
+extension and copies of the VSPAERO tools. Upstream builds the extension for
+Python 3.12, while the default `python3` in nixos-26.05 is 3.13, so the
+bindings are exposed for Python 3.12 only.
+
+Two package outputs are available:
+
+- `packages.<system>.openvsp-python` — the bindings, for use with
+  `python312Packages`.
+- `packages.<system>.openvsp-python-env` — a Python 3.12 environment that
+  already has the bindings installed.
+
+```console
+$ nix shell github:YOU/nix-openvsp#openvsp-python-env
+$ python -c 'import openvsp; print(openvsp.GetVSPVersion())'
+```
+
+With the overlay, add the bindings to an existing Python 3.12 environment:
+
+```nix
+{ inputs, pkgs, ... }:
+{
+  nixpkgs.overlays = [ inputs.openvsp.overlays.default ];
+
+  environment.systemPackages = [
+    (pkgs.python312.withPackages (ps: [ ps.openvsp ]))
+  ];
+}
+```
+
+The overlay exposes `pkgs.openvsp-python`, `pkgs.openvsp-python-env`, and
+`pkgs.python312Packages.openvsp`. It deliberately does not add `openvsp` to
+`python313Packages`, since the prebuilt extension will not load there.
+
+The bindings keep upstream's `openvsp` package directory intact so that
+`openvsp.GetVSPAEROPath()` finds the bundled VSPAERO solver, viewer, and loads
+executables. The flake check runs a `VSPAEROComputeGeometry` and
+`VSPAEROSweep` analysis through the Python API, and also checks that every
+tool in `$out/bin` is executable:
+
+```console
+$ nix build .#checks.x86_64-linux.openvsp-python-tools -L
+```
+
 ### Overlay (optional)
 
 If you would rather have `pkgs.openvsp` available everywhere, use the overlay.
@@ -74,7 +121,7 @@ provide the expected library SONAMEs, and NOSA 1.3 has to be allowed:
 { inputs, pkgs, ... }:
 {
   nixpkgs.overlays = [ inputs.openvsp.overlays.default ];
-  nixpkgs.config.allowUnfreePackages = [ "openvsp" ];
+  nixpkgs.config.allowUnfreePackages = [ "openvsp" "openvsp-python" ];
   environment.systemPackages = [ pkgs.openvsp ];
 }
 ```
